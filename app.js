@@ -49,8 +49,16 @@ function getQuestionTextAlt(q) {
 }
 
 function getTranslation(q) {
-    if (Array.isArray(q.translations) && q.translations.length) return q.translations[0];
-    return null;
+    if (!Array.isArray(q.translations) || !q.translations.length) return null;
+    // Prefer an entry explicitly tagged as Hindi
+    const hindi = q.translations.find(t => /hindi|hin|hi/i.test(pick(t, ['lang', 'language', 'code'], '')));
+    if (hindi) return hindi;
+    // Otherwise, pick the first entry whose question text differs from the main question
+    // (this skips a duplicate "English" entry that just repeats the main text)
+    const mainQ = getQuestionText(q);
+    const diff = q.translations.find(t => pick(t, ['question', 'text', 'q', 'questionText'], '') !== mainQ);
+    if (diff) return diff;
+    return q.translations[0];
 }
 
 function getQuestionImage(q) {
