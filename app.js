@@ -39,7 +39,16 @@ function pick(obj, keys, fallback) {
 }
 
 function getQuestionText(q) {
-    return pick(q, ['question', 'text', 'q', 'questionText', 'title'], '');
+    const direct = pick(q, ['question', 'text', 'q', 'questionText', 'title'], '');
+    if (direct) return direct;
+    // Top-level question empty (jaisa aapke schema me hota hai) —
+    // English translation se fallback lo, na mile to pehla translation.
+    if (Array.isArray(q.translations) && q.translations.length) {
+        const eng = q.translations.find(t => /english|eng|en/i.test(pick(t, ['lang', 'language', 'code'], '')));
+        const source = eng || q.translations[0];
+        return pick(source, ['question', 'text', 'q', 'questionText'], '');
+    }
+    return '';
 }
 
 function getQuestionTextAlt(q) {
@@ -77,7 +86,15 @@ function normalizeOption(opt) {
 }
 
 function getOptions(q) {
-    const raw = pick(q, ['options', 'choices', 'answers'], []);
+    let raw = pick(q, ['options', 'choices', 'answers'], []);
+    // Agar top-level options khaali text wale hain, translation se le lo
+    const isBlank = !Array.isArray(raw) || raw.every(o => !pick(normalizeOption(o), ['text'], ''));
+    if (isBlank && Array.isArray(q.translations) && q.translations.length) {
+        const eng = q.translations.find(t => /english|eng|en/i.test(pick(t, ['lang', 'language', 'code'], '')));
+        const source = eng || q.translations[0];
+        const altRaw = pick(source, ['options', 'choices', 'answers'], []);
+        if (Array.isArray(altRaw) && altRaw.length) raw = altRaw;
+    }
     if (!Array.isArray(raw)) return [];
     return raw.map(normalizeOption);
 }
