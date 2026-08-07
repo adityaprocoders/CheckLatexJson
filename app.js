@@ -38,40 +38,71 @@ function pick(obj, keys, fallback) {
     return fallback;
 }
 
-function getQuestionText(q) {
-    const direct = pick(q, ['question', 'text', 'q', 'questionText', 'title'], '');
-    if (direct) return direct;
-    // Top-level question empty (jaisa aapke schema me hota hai) —
-    // English translation se fallback lo, na mile to pehla translation.
-    if (Array.isArray(q.translations) && q.translations.length) {
-        const eng = q.translations.find(t => /english|eng|en/i.test(pick(t, ['lang', 'language', 'code'], '')));
-        const source = eng || q.translations[0];
-        return pick(source, ['question', 'text', 'q', 'questionText'], '');
-    }
-    return '';
+/* Returns true if a value counts as "present" (non-empty string, non-empty array, etc) */
+function hasValue(v) {
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string') return v.trim() !== '';
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
 }
 
-function getQuestionTextAlt(q) {
-    const t = getTranslation(q);
-    if (t) return pick(t, ['question', 'text', 'q', 'questionText'], '');
+/* All translation entries, safely, regardless of key name variants */
+function getTranslations(q) {
+    const t = pick(q, ['translations', 'translation', 'langs', 'languages'], []);
+    return Array.isArray(t) ? t : [];
+}
+
+/* Find a translation entry by language pattern (e.g. /english|eng|en/i) */
+function findTranslation(q, langRegex) {
+    return getTranslations(q).find(t => langRegex.test(pick(t, ['lang', 'language', 'code'], '')));
+}
+
+/* The "primary" translation to source main text/options/solution/image from
+   when the top-level fields are empty. Prefers English, else first entry. */
+function getPrimaryTranslation(q) {
+    const list = getTranslations(q);
+    if (!list.length) return null;
+    return findTranslation(q, /english|eng|^en$/i) || list[0];
+}
+
+/* The "secondary" translation shown as the alt/second-language line.
+   Prefers Hindi, else the first entry that differs from the primary. */
+function getSecondaryTranslation(q) {
+    const list = getTranslations(q);
+    if (!list.length) return null;
+    const hindi = findTranslation(q, /hindi|hin|^hi$/i);
+    if (hindi) return hindi;
+    const primary = getPrimaryTranslation(q);
+    const diff = list.find(t => t !== primary);
+    return diff || null;
+}
+
+/* Generic resolver: try top-level keys first; if empty, try the same keys
+   inside the primary translation. */
+function resolveField(q, keys, primary) {
+    const direct = pick(q, keys, undefined);
+    if (hasValue(direct)) return direct;
+    if (primary) {
+        const alt = pick(primary, keys, undefined);
+        if (hasValue(alt)) return alt;
+    }
+    return undefined;
+}
+
+function getQuestionText(q, primary) {
+    return resolveField(q, ['question', 'text', 'q', 'questionText', 'title'], primary) || '';
+}
+
+function getQuestionTextAlt(q, secondary) {
+    if (secondary) {
+        const t = pick(secondary, ['question', 'text', 'q', 'questionText'], '');
+        if (hasValue(t)) return t;
+    }
     return pick(q, ['questionHindi', 'text_hi', 'hindiText'], '');
 }
 
-function getTranslation(q) {
-    if (!Array.isArray(q.translations) || !q.translations.length) return null;
-    // Prefer an entry explicitly tagged as Hindi
-    const hindi = q.translations.find(t => /hindi|hin|hi/i.test(pick(t, ['lang', 'language', 'code'], '')));
-    if (hindi) return hindi;
-    // Otherwise, pick the first entry whose question text differs from the main question
-    // (this skips a duplicate "English" entry that just repeats the main text)
-    const mainQ = getQuestionText(q);
-    const diff = q.translations.find(t => pick(t, ['question', 'text', 'q', 'questionText'], '') !== mainQ);
-    if (diff) return diff;
-    return q.translations[0];
-}
-
-function getQuestionImage(q) {
-    return pick(q, ['questionImage', 'qImage', 'image'], null);
+function getQuestionImage(q, primary) {
+    return resolveField(q, ['questionImage', 'qImage', 'image'], primary) || null;
 }
 
 function normalizeOption(opt) {
@@ -85,15 +116,20 @@ function normalizeOption(opt) {
     return { text: String(opt), image: null };
 }
 
-function getOptions(q) {
+/* True if every option in the array has blank text and no image */
+function optionsAreBlank(rawOptions) {
+    if (!Array.isArray(rawOptions) || !rawOptions.length) return true;
+    return rawOptions.every(o => {
+        const n = normalizeOption(o);
+        return !hasValue(n.text) && !hasValue(n.image);
+    });
+}
+
+function getOptions(q, primary) {
     let raw = pick(q, ['options', 'choices', 'answers'], []);
-    // Agar top-level options khaali text wale hain, translation se le lo
-    const isBlank = !Array.isArray(raw) || raw.every(o => !pick(normalizeOption(o), ['text'], ''));
-    if (isBlank && Array.isArray(q.translations) && q.translations.length) {
-        const eng = q.translations.find(t => /english|eng|en/i.test(pick(t, ['lang', 'language', 'code'], '')));
-        const source = eng || q.translations[0];
-        const altRaw = pick(source, ['options', 'choices', 'answers'], []);
-        if (Array.isArray(altRaw) && altRaw.length) raw = altRaw;
+    if (optionsAreBlank(raw) && primary) {
+        const altRaw = pick(primary, ['options', 'choices', 'answers'], []);
+        if (!optionsAreBlank(altRaw)) raw = altRaw;
     }
     if (!Array.isArray(raw)) return [];
     return raw.map(normalizeOption);
@@ -132,16 +168,24 @@ function getSolutionObj(raw) {
     return { text: String(raw), image: null };
 }
 
-function getSolution(q) {
-    const raw = pick(q, ['solution', 'sol', 'explanation'], null);
-    return getSolutionObj(raw);
+function getSolution(q, primary) {
+    let raw = pick(q, ['solution', 'sol', 'explanation'], null);
+    let obj = getSolutionObj(raw);
+    if (!hasValue(obj.text) && !hasValue(obj.image) && primary) {
+        const altRaw = pick(primary, ['solution', 'sol', 'explanation'], null);
+        const altObj = getSolutionObj(altRaw);
+        if (hasValue(altObj.text) || hasValue(altObj.image)) obj = altObj;
+    }
+    return obj;
 }
 
-function getSolutionAlt(q) {
-    const t = getTranslation(q);
-    if (t) {
-        const raw = pick(t, ['solution', 'sol', 'explanation'], null);
-        if (raw) return getSolutionObj(raw);
+function getSolutionAlt(q, secondary) {
+    if (secondary) {
+        const raw = pick(secondary, ['solution', 'sol', 'explanation'], null);
+        if (raw) {
+            const obj = getSolutionObj(raw);
+            if (hasValue(obj.text) || hasValue(obj.image)) return obj;
+        }
     }
     return null;
 }
@@ -218,18 +262,21 @@ async function renderPaper() {
     const html = data.map((q, idx) => {
         if (!q || typeof q !== 'object') { skipped++; return ''; }
 
+        const primary = getPrimaryTranslation(q);
+        const secondary = getSecondaryTranslation(q);
+
         const qNum = pick(q, ['order', 'qNo', 'number'], idx + 1);
-        const qText = getQuestionText(q);
-        const qTextAlt = getQuestionTextAlt(q);
-        const qImg = getQuestionImage(q);
-        const options = getOptions(q);
+        const qText = getQuestionText(q, primary);
+        const qTextAlt = getQuestionTextAlt(q, secondary);
+        const qImg = getQuestionImage(q, primary);
+        const options = getOptions(q, primary);
         const correctSet = getCorrectSet(q, options);
         const numericAnswer = getNumericAnswer(q);
-        const solution = getSolution(q);
-        const solutionAlt = getSolutionAlt(q);
+        const solution = getSolution(q, primary);
+        const solutionAlt = getSolutionAlt(q, secondary);
         const meta = showMeta ? getMeta(q) : [];
 
-        if (!qText && !qImg) { skipped++; return ''; }
+        if (!hasValue(qText) && !hasValue(qImg)) { skipped++; return ''; }
 
         const metaHtml = meta.length
             ? `<div class="q-head"><span>${meta.map(m => `<span class="badge">${escapeHtml(m)}</span>`).join('')}</span></div>`
@@ -248,7 +295,7 @@ async function renderPaper() {
             ? `<div class="numeric-ans">Answer: ${escapeHtml(numericAnswer)}</div>`
             : '';
 
-        const hasSol = solution.text || solution.image || (solutionAlt && (solutionAlt.text || solutionAlt.image));
+        const hasSol = hasValue(solution.text) || hasValue(solution.image) || (solutionAlt && (hasValue(solutionAlt.text) || hasValue(solutionAlt.image)));
         const solutionHtml = hasSol ? `
             <div class="sol-btn" onclick="toggleOne(this)">View Solution</div>
             <div class="sol" style="display:${solutionsVisible ? 'block' : 'none'};">
