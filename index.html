@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Paper Generator</title>
+<script>
+    window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$','$$'],['\\[','\\]']] }, svg: { fontCache: 'global' } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="main-wrapper">
+    <div class="editor">
+        <label>Upload / Paste JSON (any format)</label>
+        <input type="file" id="file-input" accept=".json,application/json" />
+        <textarea id="json-input" placeholder="Paste your JSON here — array, single object, or {questions:[...]}"></textarea>
+        <div class="opts-row">
+            <label><input type="checkbox" id="single-col-toggle" /> Single column</label>
+            <label><input type="checkbox" id="show-meta-toggle" checked /> Show tags/marks</label>
+        </div>
+        <button onclick="renderPaper()" style="background:#27ae60; color:white;">Render</button>
+        <button onclick="window.print()" style="background:#e67e22; color:white;">Print / Save as PDF</button>
+        <button onclick="toggleAllSolutions()" style="background:#8e44ad; color:white;">Show/Hide All Solutions</button>
+        <div id="status"></div>
+    </div>
+    <div id="output-wrap">
+        <div id="output"><div class="empty-msg">Paste or upload a JSON file, then click Render.</div></div>
+    </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
