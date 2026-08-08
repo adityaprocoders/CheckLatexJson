@@ -135,6 +135,16 @@ function getOptions(q, primary) {
     return raw.map(normalizeOption);
 }
 
+/* NEW: options from the secondary (e.g. Hindi) translation, shown alongside
+   the main options — same pattern as getQuestionTextAlt for the question. */
+function getOptionsAlt(q, secondary) {
+    if (!secondary) return [];
+    const raw = pick(secondary, ['options', 'choices', 'answers'], []);
+    if (optionsAreBlank(raw)) return [];
+    if (!Array.isArray(raw)) return [];
+    return raw.map(normalizeOption);
+}
+
 function getCorrectSet(q, options) {
     let raw = pick(q, ['correctAnswers', 'correctAnswer', 'correct', 'answer', 'correctOption', 'correctOptions'], []);
     if (raw === null || raw === undefined || raw === '') return new Set();
@@ -270,6 +280,7 @@ async function renderPaper() {
         const qTextAlt = getQuestionTextAlt(q, secondary);
         const qImg = getQuestionImage(q, primary);
         const options = getOptions(q, primary);
+        const optionsAlt = getOptionsAlt(q, secondary);
         const correctSet = getCorrectSet(q, options);
         const numericAnswer = getNumericAnswer(q);
         const solution = getSolution(q, primary);
@@ -285,9 +296,13 @@ async function renderPaper() {
         const optionsHtml = options.map((opt, i) => {
             const letter = String.fromCharCode(65 + i);
             const isCorrect = correctSet.has(i);
+            const altOpt = optionsAlt[i];
+            const altHtml = (altOpt && hasValue(altOpt.text))
+                ? `<span class="opt-alt">${escapeHtml(altOpt.text)}${renderImageTag(altOpt.image, 'opt-img')}</span>`
+                : '';
             return `<div class="option${isCorrect ? ' correct' : ''}">
                         <span class="opt-label">(${letter})</span>
-                        <span>${escapeHtml(opt.text)}${renderImageTag(opt.image, 'opt-img')}</span>
+                        <span>${escapeHtml(opt.text)}${renderImageTag(opt.image, 'opt-img')}${altHtml}</span>
                     </div>`;
         }).join('');
 
