@@ -20,6 +20,7 @@
             <label><input type="checkbox" id="show-meta-toggle" checked /> Show tags/marks</label>
         </div>
         <button onclick="renderPaper()" style="background:#27ae60; color:white;">Render</button>
+        <button onclick="addNewQuestion()" style="background:#2980b9; color:white;">+ Add Question</button>
         <button onclick="window.print()" style="background:#e67e22; color:white;">Print / Save as PDF</button>
         <button onclick="toggleAllSolutions()" style="background:#8e44ad; color:white;">Show/Hide All Solutions</button>
         <div id="status"></div>
@@ -28,6 +29,51 @@
         <div id="output"><div class="empty-msg">Paste or upload a JSON file, then click Render.</div></div>
     </div>
 </div>
+
+<!-- Edit Question Modal -->
+<div id="edit-modal-overlay" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="modal-title">Edit Question</h2>
+            <span class="modal-close" onclick="closeEditForm()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Question Text</label>
+                <textarea id="f-question" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Question Image URL</label>
+                <input type="text" id="f-question-image" placeholder="https://..." />
+            </div>
+
+            <div class="form-group">
+                <label>Options <span class="hint">(check the correct one/s)</span></label>
+                <div id="f-options-list"></div>
+                <button type="button" class="add-opt-btn" onclick="addOptionRow()">+ Add Option</button>
+            </div>
+
+            <div class="form-group">
+                <label>Numeric Answer <span class="hint">(only for numeric-type questions, optional)</span></label>
+                <input type="text" id="f-numeric-answer" placeholder="Leave blank if not applicable" />
+            </div>
+
+            <div class="form-group">
+                <label>Solution / Explanation</label>
+                <textarea id="f-solution" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Solution Image URL</label>
+                <input type="text" id="f-solution-image" placeholder="https://..." />
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="modal-btn cancel-btn" onclick="closeEditForm()">Cancel</button>
+            <button class="modal-btn save-btn" onclick="saveEditForm()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>
