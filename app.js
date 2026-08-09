@@ -1,5 +1,12 @@
 let solutionsVisible = false;
 
+/* Live state: the full parsed JSON object, and the array reference inside it
+   that actually holds the question objects. Both are refreshed on every
+   render, and edit/delete/add mutate them then re-render from the result. */
+let currentParsed = null;
+let currentDataArr = null;
+let editingIndex = null;
+
 document.getElementById('file-input').addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -135,7 +142,7 @@ function getOptions(q, primary) {
     return raw.map(normalizeOption);
 }
 
-/* NEW: options from the secondary (e.g. Hindi) translation, shown alongside
+/* Options from the secondary (e.g. Hindi) translation, shown alongside
    the main options — same pattern as getQuestionTextAlt for the question. */
 function getOptionsAlt(q, secondary) {
     if (!secondary) return [];
@@ -241,6 +248,8 @@ async function renderPaper() {
 
     if (!input.trim()) {
         status.textContent = 'Paste or upload some JSON first.';
+        currentParsed = null;
+        currentDataArr = null;
         return;
     }
 
@@ -250,6 +259,8 @@ async function renderPaper() {
     } catch (e) {
         output.innerHTML = `<div class="err-msg">Invalid JSON syntax:\n${escapeHtml(e.message)}\n\nCheck for trailing commas, unquoted keys, or mismatched brackets.</div>`;
         status.textContent = 'Invalid JSON syntax — see message in the paper area.';
+        currentParsed = null;
+        currentDataArr = null;
         return;
     }
 
@@ -258,8 +269,15 @@ async function renderPaper() {
     } catch (e) {
         output.innerHTML = `<div class="err-msg">${escapeHtml(e.message)}</div>`;
         status.textContent = 'Could not locate questions in the JSON.';
+        currentParsed = null;
+        currentDataArr = null;
         return;
     }
+
+    /* Keep live references so edit/delete/add can mutate the real JSON
+       structure (whatever shape it came in as) and stay in sync. */
+    currentParsed = parsed;
+    currentDataArr = data;
 
     if (!data.length) {
         output.innerHTML = '<div class="empty-msg">No questions found in JSON.</div>';
@@ -288,6 +306,11 @@ async function renderPaper() {
         const meta = showMeta ? getMeta(q) : [];
 
         if (!hasValue(qText) && !hasValue(qImg)) { skipped++; return ''; }
+
+        const toolbarHtml = `<div class="q-card-toolbar">
+                <button type="button" class="edit-btn" onclick="openEditForm(${idx})">Edit</button>
+                <button type="button" class="delete-btn" onclick="deleteQuestion(${idx})">Delete</button>
+            </div>`;
 
         const metaHtml = meta.length
             ? `<div class="q-head"><span>${meta.map(m => `<span class="badge">${escapeHtml(m)}</span>`).join('')}</span></div>`
@@ -319,7 +342,8 @@ async function renderPaper() {
                 ${solutionAlt ? `<hr style="border:none;border-top:1px dashed #ddd;margin:6px 0;">${escapeHtml(solutionAlt.text)}${renderImageTag(solutionAlt.image, 'sol-img')}` : ''}
             </div>` : '';
 
-        return `<div class="q-box">
+        return `<div class="q-box" data-index="${idx}">
+                    ${toolbarHtml}
                     ${metaHtml}
                     <div class="q-text">Q${escapeHtml(qNum)}. ${escapeHtml(qText)}</div>
                     ${qTextAlt ? `<div class="q-text-hi">${escapeHtml(qTextAlt)}</div>` : ''}
@@ -353,3 +377,150 @@ function toggleAllSolutions() {
         el.style.display = solutionsVisible ? 'block' : 'none';
     });
 }
+
+/* ---------- Sync helper: push in-memory changes back into the JSON textarea ---------- */
+
+function syncTextareaFromState() {
+    if (!currentParsed) return;
+    document.getElementById('json-input').value = JSON.stringify(currentParsed, null, 2);
+}
+
+/* ---------- Delete ---------- */
+
+function deleteQuestion(idx) {
+    if (!currentDataArr || !currentDataArr[idx]) return;
+    const qText = getQuestionText(currentDataArr[idx], getPrimaryTranslation(currentDataArr[idx]));
+    const preview = qText ? (qText.length > 60 ? qText.slice(0, 60) + '…' : qText) : `question #${idx + 1}`;
+    if (!confirm(`Delete this question?\n\n"${preview}"\n\nThis removes it from the JSON too.`)) return;
+
+    currentDataArr.splice(idx, 1);
+    syncTextareaFromState();
+    renderPaper();
+}
+
+/* ---------- Add ---------- */
+
+function addNewQuestion() {
+    if (!currentParsed || !currentDataArr) {
+        // Nothing rendered yet — start a fresh minimal document.
+        currentParsed = [];
+        currentDataArr = currentParsed;
+    }
+    const blank = {
+        question: '',
+        questionImage: null,
+        options: [{ text: '', image: null }, { text: '', image: null }],
+        correctAnswers: [],
+        numericAnswer: null,
+        solution: { text: '', image: null }
+    };
+    currentDataArr.push(blank);
+    syncTextareaFromState();
+    renderPaper().then(() => openEditForm(currentDataArr.length - 1));
+}
+
+/* ---------- Edit modal ---------- */
+
+function openEditForm(idx) {
+    if (!currentDataArr || !currentDataArr[idx]) return;
+    editingIndex = idx;
+    const q = currentDataArr[idx];
+    const primary = getPrimaryTranslation(q);
+    const options = getOptions(q, primary);
+    const correctSet = getCorrectSet(q, options);
+    const numericAnswer = getNumericAnswer(q);
+    const solution = getSolution(q, primary);
+
+    document.getElementById('modal-title').textContent = `Edit Question ${idx + 1}`;
+    document.getElementById('f-question').value = getQuestionText(q, primary);
+    document.getElementById('f-question-image').value = getQuestionImage(q, primary) || '';
+    document.getElementById('f-numeric-answer').value = (numericAnswer === null) ? '' : numericAnswer;
+    document.getElementById('f-solution').value = solution.text || '';
+    document.getElementById('f-solution-image').value = solution.image || '';
+
+    const list = document.getElementById('f-options-list');
+    list.innerHTML = '';
+    const optsToShow = options.length ? options : [{ text: '', image: null }, { text: '', image: null }];
+    optsToShow.forEach((opt, i) => addOptionRow(opt.text, opt.image, correctSet.has(i)));
+
+    document.getElementById('edit-modal-overlay').classList.add('open');
+}
+
+function closeEditForm() {
+    document.getElementById('edit-modal-overlay').classList.remove('open');
+    editingIndex = null;
+}
+
+function addOptionRow(text = '', image = null, checked = false) {
+    const list = document.getElementById('f-options-list');
+    const row = document.createElement('div');
+    row.className = 'opt-row';
+    const letterIndex = list.children.length;
+    row.innerHTML = `
+        <span class="opt-letter">${String.fromCharCode(65 + letterIndex)}</span>
+        <input type="checkbox" class="opt-correct" ${checked ? 'checked' : ''} title="Mark as correct" />
+        <input type="text" class="opt-text" placeholder="Option text" value="${escapeHtml(text)}" />
+        <input type="text" class="opt-img-input" placeholder="Image URL (optional)" value="${escapeHtml(image || '')}" />
+        <button type="button" class="remove-opt-btn" onclick="removeOptionRow(this)" title="Remove option">&times;</button>
+    `;
+    list.appendChild(row);
+}
+
+function removeOptionRow(btn) {
+    const list = document.getElementById('f-options-list');
+    if (list.children.length <= 1) return; // keep at least one option row
+    btn.closest('.opt-row').remove();
+    // Re-letter remaining rows
+    Array.from(list.children).forEach((row, i) => {
+        row.querySelector('.opt-letter').textContent = String.fromCharCode(65 + i);
+    });
+}
+
+function saveEditForm() {
+    if (editingIndex === null || !currentDataArr || !currentDataArr[editingIndex]) {
+        closeEditForm();
+        return;
+    }
+    const q = currentDataArr[editingIndex];
+
+    const questionText = document.getElementById('f-question').value.trim();
+    if (!questionText) {
+        alert('Question text cannot be empty.');
+        return;
+    }
+
+    const questionImage = document.getElementById('f-question-image').value.trim();
+    const numericAnswerRaw = document.getElementById('f-numeric-answer').value.trim();
+    const solutionText = document.getElementById('f-solution').value.trim();
+    const solutionImage = document.getElementById('f-solution-image').value.trim();
+
+    const optionRows = Array.from(document.getElementById('f-options-list').children);
+    const options = [];
+    const correctAnswers = [];
+    optionRows.forEach((row, i) => {
+        const text = row.querySelector('.opt-text').value.trim();
+        const image = row.querySelector('.opt-img-input').value.trim();
+        const isCorrect = row.querySelector('.opt-correct').checked;
+        if (!text && !image) return; // skip fully empty rows
+        options.push({ text, image: image || null });
+        if (isCorrect) correctAnswers.push(options.length - 1);
+    });
+
+    // Write edited values directly onto the top-level question object —
+    // these take precedence over any translation fallback when rendered.
+    q.question = questionText;
+    q.questionImage = questionImage || null;
+    q.options = options;
+    q.correctAnswers = correctAnswers;
+    q.numericAnswer = numericAnswerRaw === '' ? null : numericAnswerRaw;
+    q.solution = { text: solutionText, image: solutionImage || null };
+
+    syncTextareaFromState();
+    closeEditForm();
+    renderPaper();
+}
+
+// Close modal when clicking the dark overlay (outside the modal box)
+document.getElementById('edit-modal-overlay').addEventListener('click', function (e) {
+    if (e.target === this) closeEditForm();
+});
