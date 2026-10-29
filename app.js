@@ -237,6 +237,34 @@ function renderImageTag(src, cls) {
     return `<img class="${cls}" src="${escapeHtml(src)}" />`;
 }
 
+/* ---------- Duplicate detection ---------- */
+
+function normalizeForCompare(s) {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^\p{L}\p{N}\s]/gu, '')
+        .trim();
+}
+
+/* Returns Map: duplicateIndex -> { idx, num } of the FIRST matching question */
+function buildDuplicateMap(data) {
+    const seen = new Map();
+    const dups = new Map();
+    data.forEach((q, idx) => {
+        if (!q || typeof q !== 'object') return;
+        const primary = getPrimaryTranslation(q);
+        const text = normalizeForCompare(getQuestionText(q, primary));
+        const img = getQuestionImage(q, primary) || '';
+        if (!text && !img) return;
+        const key = text + '|' + img;
+        const num = pick(q, ['order', 'qNo', 'number'], idx + 1);
+        if (seen.has(key)) dups.set(idx, seen.get(key));
+        else seen.set(key, { idx, num });
+    });
+    return dups;
+}
+
 /* ---------- Rendering ---------- */
 
 async function renderPaper() {
@@ -286,6 +314,7 @@ async function renderPaper() {
 
     const title = pick(data[0], ['paperTitle', 'title'], null) || pick(data[0], ['subject', 'sub'], null) || 'MCQ Paper';
     let skipped = 0;
+    const dupMap = buildDuplicateMap(data);
 
     const html = data.map((q, idx) => {
         if (!q || typeof q !== 'object') { skipped++; return ''; }
@@ -304,6 +333,11 @@ async function renderPaper() {
         const solution = getSolution(q, primary);
         const solutionAlt = getSolutionAlt(q, secondary);
         const meta = showMeta ? getMeta(q) : [];
+
+        const dupInfo = dupMap.get(idx);
+        const dupHtml = dupInfo
+                ? `<div class="dup-flag">⚠ Duplicate of Q${escapeHtml(dupInfo.num)}</div>`
+                : '';
 
         if (!hasValue(qText) && !hasValue(qImg)) { skipped++; return ''; }
 
@@ -342,7 +376,8 @@ async function renderPaper() {
                 ${solutionAlt ? `<hr style="border:none;border-top:1px dashed #ddd;margin:6px 0;">${escapeHtml(solutionAlt.text)}${renderImageTag(solutionAlt.image, 'sol-img')}` : ''}
             </div>` : '';
 
-        return `<div class="q-box" data-index="${idx}">
+        return `<div class="q-box${dupInfo ? ' is-duplicate' : ''}" data-index="${idx}">
+                    ${dupHtml}
                     ${toolbarHtml}
                     ${metaHtml}
                     <div class="q-text">Q${escapeHtml(qNum)}. ${escapeHtml(qText)}</div>
@@ -356,10 +391,16 @@ async function renderPaper() {
 
     output.innerHTML = `<div id="paper-title"><h1>${escapeHtml(title)}</h1></div>` + html;
 
-    status.textContent = skipped
-        ? `Rendered ${data.length - skipped} question(s). Skipped ${skipped} empty/invalid entr${skipped === 1 ? 'y' : 'ies'}.`
-        : `Rendered ${data.length} question(s).`;
-    status.style.color = skipped ? '#c0392b' : '#27ae60';
+    const baseMsg = skipped
+    ? `Rendered ${data.length - skipped} question(s). Skipped ${skipped} empty/invalid entr${skipped === 1 ? 'y' : 'ies'}.`
+    : `Rendered ${data.length} question(s).`;
+const baseColor = skipped ? '#c0392b' : '#27ae60';
+
+status.innerHTML = `<span style="color:${baseColor}">${escapeHtml(baseMsg)}</span>`
+    + (dupMap.size
+        ? `<br><span style="color:#c0392b; font-weight:bold;">⚠ ${dupMap.size} duplicate question(s) found</span>`
+        : '');
+
 
     if (window.MathJax && window.MathJax.typesetPromise) {
         await MathJax.typesetPromise([output]);
