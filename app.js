@@ -248,19 +248,37 @@ function normalizeForCompare(s) {
 }
 
 /* Returns Map: duplicateIndex -> { idx, num } of the FIRST matching question */
+/* Returns Map: duplicateIndex -> { idx, num, reason } of the FIRST matching question.
+   Duplicate if English matches OR Hindi matches OR both. */
 function buildDuplicateMap(data) {
-    const seen = new Map();
+    const seenEn = new Map();
+    const seenHi = new Map();
     const dups = new Map();
     data.forEach((q, idx) => {
         if (!q || typeof q !== 'object') return;
         const primary = getPrimaryTranslation(q);
-        const text = normalizeForCompare(getQuestionText(q, primary));
+        const secondary = getSecondaryTranslation(q);
         const img = getQuestionImage(q, primary) || '';
-        if (!text && !img) return;
-        const key = text + '|' + img;
+        const en = normalizeForCompare(getQuestionText(q, primary));
+        const hi = normalizeForCompare(getQuestionTextAlt(q, secondary));
+        if (!en && !hi && !img) return;
+
         const num = pick(q, ['order', 'qNo', 'number'], idx + 1);
-        if (seen.has(key)) dups.set(idx, seen.get(key));
-        else seen.set(key, { idx, num });
+        const enKey = en ? en + '|' + img : '';
+        const hiKey = hi ? hi + '|' + img : '';
+
+        const enMatch = enKey ? seenEn.get(enKey) : null;
+        const hiMatch = hiKey ? seenHi.get(hiKey) : null;
+
+        if (enMatch || hiMatch) {
+            const orig = enMatch || hiMatch;
+            const reason = (enMatch && hiMatch) ? 'English + Hindi' : (enMatch ? 'English' : 'Hindi');
+            dups.set(idx, { idx: orig.idx, num: orig.num, reason });
+        }
+
+        const info = { idx, num };
+        if (enKey && !seenEn.has(enKey)) seenEn.set(enKey, info);
+        if (hiKey && !seenHi.has(hiKey)) seenHi.set(hiKey, info);
     });
     return dups;
 }
@@ -336,8 +354,8 @@ async function renderPaper() {
 
         const dupInfo = dupMap.get(idx);
         const dupHtml = dupInfo
-                ? `<div class="dup-flag">⚠ Duplicate of Q${escapeHtml(dupInfo.num)}</div>`
-                : '';
+    ? `<div class="dup-flag">⚠ Duplicate of Q${escapeHtml(dupInfo.num)} (${dupInfo.reason})</div>`
+    : '';
 
         if (!hasValue(qText) && !hasValue(qImg)) { skipped++; return ''; }
 
