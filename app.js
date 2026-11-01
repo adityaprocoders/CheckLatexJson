@@ -457,6 +457,33 @@ function deleteQuestion(idx) {
     renderPaper();
 }
 
+
+/* ---------- Delete all duplicates in one click ---------- */
+
+function deleteAllDuplicates() {
+    const status = document.getElementById('status');
+    if (!currentDataArr || !currentDataArr.length) {
+        status.innerHTML = '<span style="color:#c0392b">Pehle JSON Render karo.</span>';
+        return;
+    }
+    const dupMap = buildDuplicateMap(currentDataArr);
+    if (!dupMap.size) {
+        status.innerHTML = '<span style="color:#27ae60">Koi duplicate question nahi mila.</span>';
+        return;
+    }
+    if (!confirm(`${dupMap.size} duplicate question(s) delete honge.\nSirf pehla original rahega.\nJSON se bhi hat jayenge.\n\nContinue?`)) return;
+
+    const indexes = Array.from(dupMap.keys()).sort((a, b) => b - a);
+    indexes.forEach(i => currentDataArr.splice(i, 1));
+
+    const removed = indexes.length;
+    syncTextareaFromState();
+    renderPaper().then(() => {
+        const st = document.getElementById('status');
+        st.innerHTML += `<br><span style="color:#27ae60; font-weight:bold;">✔ ${removed} duplicate question(s) deleted.</span>`;
+    });
+}
+
 /* ---------- Add ---------- */
 
 function addNewQuestion() {
